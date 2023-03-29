@@ -1,5 +1,0 @@
-{
-    "board": "arduino:avr:uno",
-    "sketch": "ROD_workshop.ino",
-    "port": "COM6"
-}
