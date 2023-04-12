@@ -2,14 +2,16 @@
 #include <PID_v1.h>
 
 #define W1 2
-#define W2 3
-#define Pot A3
+#define W2 9
+#define Pot A0
 #define MotorPWM 10
+#define DirectionPin 12
 
 double Setpoint, Input, Output;
 
 double Speed;
-bool direction;
+// True = forward , False = backwards
+bool MeasuredDirection;
 int potValue;
 
 k_t *s_sem, *pid_sem, *pot_sem;
@@ -37,12 +39,14 @@ void ReadPot()
 {
     while (1)
     {
-        k_wait(s_sem, 0);
-        Serial.println("Reading potentiometer");
-        k_signal(s_sem);
+        //k_wait(s_sem, 0);
+        //Serial.println("Reading potentiometer");
+        //k_signal(s_sem);
+
         k_wait(pot_sem,0);
         potValue = analogRead(Pot) - 511;
         k_signal(pot_sem);
+
         k_sleep(100);
     }
 }
@@ -51,29 +55,35 @@ void MotorControl()
 {
     while (1)
     {
-        k_wait(s_sem, 0);
-        Serial.println("Controling motor");
-        k_signal(s_sem);
+        //k_wait(s_sem, 0);
+        //Serial.println("Controling motor");
+        //k_signal(s_sem);
 
         k_wait(pot_sem,0);
-        Setpoint = map(abs(potValue), 0, 511, 0, 255);
+        Setpoint = map(potValue, -511, 511, -255, 255);
         k_signal(pot_sem);
-
-        Input = map(Speed * 1000, 0, 1000, 0, 255); // some value selected as the max speed of motor is unkown.
+        MeasuredDirection ? Input = map(Speed * 1000, 0, 1000, 0, 255) : Input = map(Speed * 1000, 0, 1000, -255, 0);
 
         k_wait(pid_sem,0);
-        myPID.Compute();
-        k_signal(0);
-        
-        analogWrite(MotorPWM, Output);
+        //Output += (Setpoint-Input)*myPID.GetKp();
+        if((Setpoint-Input) > 0 && Output < 255.0){
+            Output+=0.1;
+        } else if((Setpoint-Input) < 0 && Output > 0.01){
+            Output-=0.1;
+        }
+        //myPID.Compute();
+        k_signal(pid_sem);
+
+        analogWrite(MotorPWM,abs(Output));
+        digitalWrite(DirectionPin,Output > 0);
         k_sleep(10);
     }
 }
 
 void MeasureSpeed()
 {
-    static int lastTime;
-    Speed = 1 / (millis() - lastTime);
+    static long int lastTime;
+    Speed = 1.0/(millis() - lastTime);
     lastTime = millis();
     /*
     if(digitalRead(W2)== HIGH){
@@ -82,16 +92,16 @@ void MeasureSpeed()
         direction = false;
     }
     */
-    direction = digitalRead(W2);
+    MeasuredDirection = digitalRead(W2);
 }
 
 void ReadSerial()
 {
     while (1)
     {
-        k_wait(s_sem, 0);
-        Serial.println("Reading serial");
-        k_signal(s_sem);
+        //k_wait(s_sem, 0);
+        //Serial.println("Reading serial");
+        //k_signal(s_sem);
         static char Buffer[100]; // need to be global.... otherwise we use all memory ;)
         static char BeginCharBuffer;
         double Ki, Kp, Kd;
@@ -104,22 +114,24 @@ void ReadSerial()
 
                 memset(Buffer, NULL, 100);
                 Serial.readBytesUntil(',', Buffer, 100);
-                Kp = String(Buffer).toDouble();
+                Kp = strtod(Buffer,NULL);
+                k_wait(s_sem,0);
+                Serial.println(Kp);
+                k_signal(s_sem);
 
                 // zero buffer
                 memset(Buffer, NULL, 100);
                 Serial.readBytesUntil(',', Buffer, 100);
-                Ki = String(Buffer).toDouble();
+                Ki = strtod(Buffer,NULL);
 
                 // zero buffer
                 memset(Buffer, NULL, 100);
                 Serial.readBytesUntil('&', Buffer, 100);
-                Kd = String(Buffer).toDouble();
+                Kd = strtod(Buffer,NULL);
             }
         }
         if (Kd > 0.001 && Ki > 0.001 && Kp > 0.001)
         {
-
             k_wait(pid_sem, 0);
             myPID.SetTunings(Kp,Ki,Kd);
             k_signal(pid_sem);
@@ -133,26 +145,29 @@ void loggin()
     while (1)
     {
         k_wait(s_sem, 0);
-        Serial.println("loggin");
+        Serial.print("Speed: ");
+        Serial.print(Input);
+        Serial.print(" wanted speed: ");
+        Serial.print(Setpoint);
+        Serial.print(" out speed: ");
+        Serial.print(int(Output));
+        Serial.print(" P: ");
+        Serial.print(myPID.GetKp());
+        Serial.print(" I: ");
+        Serial.print(myPID.GetKi());
+        Serial.print(" D: ");
+        Serial.print(myPID.GetKd());
+        Serial.print(" direction: ");
+        Serial.println(MeasuredDirection);
         k_signal(s_sem);
-        // Serial.println(printf("speed: %lf, wanted speed: %lf, output speed: %lf ,P:%lf,I:%lf,D:%lf direction: %d",Speed, Setpoint,Output,Kp,Ki,Kd,direction));
-
         k_sleep(1000);
     }
-}
-
-void k_breakout()
-{
-    bool flip = true;
-    digitalWrite(11, flip);
-    flip = !flip;
 }
 
 void setup()
 {
     Serial.begin(115200);
 
-    pinMode(11, OUTPUT);
     pinMode(W1, INPUT_PULLUP);
     pinMode(W2, INPUT_PULLUP);
     pinMode(MotorPWM, OUTPUT);
