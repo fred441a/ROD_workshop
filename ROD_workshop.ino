@@ -68,9 +68,9 @@ void MotorControl()
         k_wait(pid_sem,0);
         //Output += (Setpoint-Input)*myPID.GetKp();
         if((Setpoint-Input) > 0){
-            Output+=0.01*(Setpoint-Input);
+            Output+=0.01;
         } else if((Setpoint-Input) < 0){
-            Output-=0.01*(Setpoint-Input);
+            Output-=0.01;
         }
 
         if (Output > 255.0) Output = 255.0;
