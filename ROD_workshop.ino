@@ -10,9 +10,10 @@
 double Setpoint, Input, Output;
 
 double Speed;
-// True = forward , False = backwards
-bool MeasuredDirection;
+// True = backwards , False = forward
+bool MeasuredDirection = true;
 int potValue;
+long int count;
 
 k_t *s_sem, *pid_sem, *pot_sem;
 
@@ -22,6 +23,7 @@ char Heap_ReadSerial[200];
 char Heap_Readpot[100];
 char Heap_MotorControl[100];
 char Heap_Loggin[200];
+char Heap_CalculateSpeed[100];
 
 /*
 void installIRS()
@@ -62,15 +64,17 @@ void MotorControl()
         k_wait(pot_sem,0);
         Setpoint = map(potValue, -511, 511, -255, 255);
         k_signal(pot_sem);
-        MeasuredDirection ? Input = map(Speed * 1000, 0, 1000, 0, 255) : Input = map(Speed * 1000, 0, 1000, -255, 0);
-
+        MeasuredDirection ? Input = Speed : Input = -Speed;
         k_wait(pid_sem,0);
         //Output += (Setpoint-Input)*myPID.GetKp();
-        if((Setpoint-Input) > 0 && Output < 255.0){
-            Output+=0.1;
-        } else if((Setpoint-Input) < 0 && Output > 0.01){
-            Output-=0.1;
+        if((Setpoint-Input) > 0){
+            Output+=0.01*(Setpoint-Input);
+        } else if((Setpoint-Input) < 0){
+            Output-=0.01*(Setpoint-Input);
         }
+
+        if (Output > 255.0) Output = 255.0;
+        else if (Output < -255.0) Output = -255.0;
         //myPID.Compute();
         k_signal(pid_sem);
 
@@ -80,19 +84,20 @@ void MotorControl()
     }
 }
 
+void CalculateSpeed(){
+    while(1){
+        Speed = map(count,0,17000,0,255);
+        count = 0;
+        k_sleep(1000);
+    }
+}
+
 void MeasureSpeed()
 {
-    static long int lastTime;
-    Speed = 1.0/(millis() - lastTime);
-    lastTime = millis();
-    /*
-    if(digitalRead(W2)== HIGH){
-        direction = true;
-    }else{
-        direction = false;
-    }
-    */
-    MeasuredDirection = digitalRead(W2);
+    count++;
+    MeasuredDirection = (PINB & (1<<(W2-8))) > 0;
+    //Serial.println((PINB), BIN);
+    // MeasuredDirection = digitalRead(W2);
 }
 
 void ReadSerial()
@@ -171,13 +176,15 @@ void setup()
     pinMode(W1, INPUT_PULLUP);
     pinMode(W2, INPUT_PULLUP);
     pinMode(MotorPWM, OUTPUT);
+    pinMode(DirectionPin,OUTPUT);
     attachInterrupt(digitalPinToInterrupt(W1), MeasureSpeed, RISING);
 
-    k_init(4, 3, 0);
+    k_init(5, 3, 0);
     s_sem = k_crt_sem(1, 1);
     pid_sem = k_crt_sem(1, 1);
     pot_sem = k_crt_sem(1,1);
-    k_crt_task(MotorControl, 1, Heap_MotorControl, 100);
+    k_crt_task(CalculateSpeed,1,Heap_CalculateSpeed,100);
+    k_crt_task(MotorControl, 2, Heap_MotorControl, 100);
     k_crt_task(ReadPot, 10, Heap_Readpot, 100);
     k_crt_task(ReadSerial, 20, Heap_ReadSerial, 200);
     k_crt_task(loggin, 30, Heap_Loggin, 200);
